@@ -1,6 +1,5 @@
-#include <Wire.h>
 #include <Servo.h>
-#include "DualMC33926MotorShield.h"
+#include <Wire.h>
 
 
 // ****************************************************************************
@@ -11,10 +10,15 @@
 const byte ENCODER_A_PIN          =    2;
 const byte ENCODER_B_PIN          =    3;
 const byte ENCODER_INT_PIN        =    2;
-const byte MOTOR_PAN_PIN          =   11;
-const byte MOTOR_TILT_PIN         =   10;
-const byte FEEDBACK_PAN_PIN       =   A2;
-const byte FEEDBACK_TILT_PIN      =   A1;
+const byte MOTOR_PWM_PIN          =    6;
+const byte MOTOR_DIR_PIN          =    7;
+const byte MOTOR_FBK_PIN          =   A0;
+const byte MOTOR_ND2_PIN          =    4;
+const byte MOTOR_NSF_PIN          =   12;
+const byte SERVO_PAN_PIN          =   11;
+const byte SERVO_PAN_FBK_PIN      =   A2;
+const byte SERVO_TILT_PIN         =   10;
+const byte SERVO_TILT_FBK_PIN     =   A1;
 const byte LOWER_LIMIT_SWITCH_PIN =   A6;
 const byte UPPER_LIMIT_SWITCH_PIN =   A7;
 
@@ -28,9 +32,9 @@ const byte CMD_MOVE               = 0x4D;  // 'M'
 const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
-const int  MOTOR_MM2STEPS         =   25;
-const int  MOTOR_SPEED            = -200;
-const int  MOTOR_MM2STEPS_2       = MOTOR_MM2STEPS / 2;
+const word MOTOR_MM2STEPS         =   25;
+const word MOTOR_SPEED            =  128;
+const word MOTOR_MM2STEPS_2       = MOTOR_MM2STEPS / 2;
 
 // Other
 const word LIMIT_SWITCH_THRESHOLD =  400;
@@ -57,7 +61,6 @@ struct Target {
 // ****************************************************************************
 
 // Motors
-DualMC33926MotorShield motorVert;
 Servo motorPan, motorTilt;
 char motorDirection = 0;
 // Context
@@ -81,15 +84,20 @@ void setup() {
   digitalWrite(ENCODER_A_PIN, HIGH);
   pinMode(ENCODER_B_PIN, INPUT);
   digitalWrite(ENCODER_B_PIN, HIGH);
+  pinMode(MOTOR_PWM_PIN, OUTPUT);
+  pinMode(MOTOR_DIR_PIN, OUTPUT);
+  pinMode(MOTOR_FBK_PIN, INPUT);
+  pinMode(MOTOR_ND2_PIN, OUTPUT);
+  digitalWrite(MOTOR_ND2_PIN, HIGH);
+  pinMode(MOTOR_NSF_PIN, INPUT);
 
   // Interrupts
   attachInterrupt(digitalPinToInterrupt(ENCODER_INT_PIN),
     readEncoder, FALLING);
 
-  // Motors
-  motorVert.init();
-  motorPan.attach(MOTOR_PAN_PIN);  
-  motorTilt.attach(MOTOR_TILT_PIN);
+  // Servos
+  motorPan.attach(SERVO_PAN_PIN);  
+  motorTilt.attach(SERVO_TILT_PIN);
 
   // Wire and serial
   Wire.begin(I2C_ADDR);
@@ -98,8 +106,8 @@ void setup() {
   Serial.begin(9600);
 
   // Move motors to position that is read from feedback
-  const byte panPos  = analogRead(FEEDBACK_PAN_PIN ) * 10 / 42;
-  const byte tiltPos = analogRead(FEEDBACK_TILT_PIN) * 10 / 42;
+  const byte panPos  = analogRead(SERVO_PAN_FBK_PIN ) * 10 / 42;
+  const byte tiltPos = analogRead(SERVO_TILT_FBK_PIN) * 10 / 42;
   motorPan.write(panPos);
   motorTilt.write(tiltPos);
 }
@@ -107,7 +115,7 @@ void setup() {
 // Loop method
 void loop() {
   readSerial();
-  updateMotor(motorVert, state.vert, target.vert);
+  updateMotor(state.vert, target.vert);
   updateServo(motorPan , state.pan , target.pan );
   updateServo(motorTilt, state.tilt, target.tilt);
   dump();
@@ -120,8 +128,7 @@ void loop() {
 // ****************************************************************************
 
 // Updates the movement of a motor
-void updateMotor(DualMC33926MotorShield& motor,
-                 unsigned long current, unsigned long target) {
+void updateMotor(unsigned long current, unsigned long target) {
   if      (target == 0)      motorDirection = -1; // Down
   else if (current < target) motorDirection = +1; // Up
   else if (current > target) motorDirection = -1; // Down
@@ -134,7 +141,8 @@ void updateMotor(DualMC33926MotorShield& motor,
     if (motorDirection > 0) motorDirection = 0; // Stop up motion
   }
   // Update
-  motor.setM1Speed(motorDirection * MOTOR_SPEED);
+  analogWrite(MOTOR_PWM_PIN, motorDirection != 0 ? MOTOR_SPEED : 0);
+  digitalWrite(MOTOR_DIR_PIN, motorDirection > 0 ? HIGH : LOW);
 }
 
 // Updates the movement of a servo
