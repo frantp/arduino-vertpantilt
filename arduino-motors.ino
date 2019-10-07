@@ -18,8 +18,10 @@ const byte FEEDBACK_TILT_PIN      =   A1;
 const byte LOWER_LIMIT_SWITCH_PIN =   A6;
 const byte UPPER_LIMIT_SWITCH_PIN =   A7;
 
-// I2C address
+// Communication
 const byte I2C_ADDR               = 0x16;
+const char SERIAL_STR_MARKER      = '<';
+const char SERIAL_END_MARKER      = '>';
 
 // Commands
 const byte CMD_MOVE               = 0x4D;  // 'M'
@@ -55,11 +57,17 @@ struct Target {
 // Variables
 // ****************************************************************************
 
+// Motors
 DualMC33926MotorShield motorVert;
 Servo motorPan, motorTilt;
+// Context
 byte cmd = CMD_READ;
 State state = { 0, 0, 0, 0, 0, 0 };
 Target target = { 0, 0, 0 };
+// Serial
+char serialBuffer[8];
+byte serialIdx = 0;
+char serialStarted = false;
 
 
 // ****************************************************************************
@@ -98,6 +106,7 @@ void setup() {
 
 // Loop method
 void loop() {
+  readSerial();
   updateMotor(motorVert, state.vert, target.vert);
   updateServo(motorPan , state.pan , target.pan );
   updateServo(motorTilt, state.tilt, target.tilt);
@@ -163,7 +172,8 @@ void receiveEvent(int howMany) {
       return;
     }
   }
-  Serial.println("ERROR: Unknown command");
+  Serial.print("ERROR: Unknown command ");
+  Serial.println(cmd, HEX);
 }
 
 // Receives a request for data
@@ -181,6 +191,39 @@ void requestEvent() {
   };
   // Send
   Wire.write(msg, 7);
+}
+
+// Reads input from serial
+void readSerial() {
+  while (Serial.available()) {
+    char ch = Serial.read();
+    if (ch == SERIAL_STR_MARKER) {
+      serialStarted = true;
+      serialIdx = 0;
+    } else if (serialStarted) {
+      if (ch == SERIAL_END_MARKER) {
+        serialBuffer[serialIdx++] = '\0';
+        processSerialCommand();
+        serialStarted = false;
+      } else {
+        serialBuffer[serialIdx++] = ch;
+      }
+    }
+    if (serialIdx == 7) {
+      Serial.print("ERROR: Command too long");
+      serialStarted = false;
+    }
+  }
+}
+
+void processSerialCommand() {
+  switch (serialBuffer[0]) {
+    case 'V': target.vert = atoi(serialBuffer + 1); return;
+    case 'P': target.pan  = atoi(serialBuffer + 1); return;
+    case 'T': target.tilt = atoi(serialBuffer + 1); return;
+  }
+  Serial.print("ERROR: Unknown command ");
+  Serial.println(serialBuffer[0]);
 }
 
 
