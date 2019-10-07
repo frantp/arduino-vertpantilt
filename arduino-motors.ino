@@ -8,33 +8,46 @@
 // ****************************************************************************
 
 // Pins
-const byte ENCODER_A_PIN     =    2;
-const byte ENCODER_B_PIN     =    3;
-const byte ENCODER_INT_PIN   =    2;
-const byte MOTOR_PAN_PIN     =   11;
-const byte MOTOR_TILT_PIN    =   10;
-const byte FEEDBACK_PAN_PIN  =   A2;
-const byte FEEDBACK_TILT_PIN =   A1;
+const byte ENCODER_A_PIN          =    2;
+const byte ENCODER_B_PIN          =    3;
+const byte ENCODER_INT_PIN        =    2;
+const byte MOTOR_PAN_PIN          =   11;
+const byte MOTOR_TILT_PIN         =   10;
+const byte FEEDBACK_PAN_PIN       =   A2;
+const byte FEEDBACK_TILT_PIN      =   A1;
+const byte LOWER_LIMIT_SWITCH_PIN =   A6;
+const byte UPPER_LIMIT_SWITCH_PIN =   A7;
 
 // I2C address
-const byte I2C_ADDR          = 0x16;
+const byte I2C_ADDR               = 0x16;
 
 // Commands
-const byte CMD_MOVE_VERT     = 0xA0;
-const byte CMD_MOVE_PAN      = 0xA1;
-const byte CMD_MOVE_TILT     = 0xA2;
-const byte CMD_READ_STATE    = 0xB0;
+const byte CMD_MOVE               = 0x4D;  // 'M'
+const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
-const word MOTOR_MAX_MM      = 1400;
-const word MOTOR_MM2ENCODER  =  250;
-const word MOTOR_SPEED       =  200;
-const word SERVO_DELAY       =   10;
+const word MOTOR_MAX_MM           = 1400;
+const word MOTOR_MM2STEPS         =   25;
+const word MOTOR_SPEED            =  200;
+const word MOTOR_MAX_STEPS        = MOTOR_MAX_MM * MOTOR_MM2STEPS;
+const word MOTOR_MM2STEPS_2       = MOTOR_MM2STEPS / 2;
 
+// Other
+const word LOOP_DELAY             =   10;
+
+
+// ****************************************************************************
 // Structures
+// ****************************************************************************
+
 struct State {
   volatile unsigned long vert;
   byte pan, tilt, flags, bat1Voltage, bat2Voltage;
+};
+
+struct Target {
+  unsigned long vert;
+  byte pan, tilt;
 };
 
 
@@ -44,13 +57,13 @@ struct State {
 
 DualMC33926MotorShield motorVert;
 Servo motorPan, motorTilt;
-byte cmd = CMD_READ_STATE;
-byte pos = 0;
+byte cmd = CMD_READ;
 State state = { 0, 0, 0, 0, 0, 0 };
+Target target = { 0, 0, 0 };
 
 
 // ****************************************************************************
-// Functions
+// Main
 // ****************************************************************************
 
 // Setup method
@@ -81,130 +94,126 @@ void setup() {
   const byte tiltPos = analogRead(FEEDBACK_TILT_PIN) * 10 / 42;
   motorPan.write(panPos);
   motorTilt.write(tiltPos);
-  Serial.print("pan: ");
-  Serial.print(panPos);
-  Serial.print(", tilt: ");
-  Serial.print(tiltPos);
-  Serial.println();
 }
 
 // Loop method
 void loop() {
-  if (cmd != CMD_READ_STATE) {
-    Serial.print("ACT: ");
-    Serial.print(cmdChar(cmd));
-    Serial.print(pos);
-    Serial.println();
-  }
-  switch (cmd) {
-    case CMD_MOVE_VERT: {
-      Serial.print("cm");
-      word mmPos = pos * 10;
-      if (mmPos > MOTOR_MAX_MM) mmPos = MOTOR_MAX_MM;
-      moveMotor(motorVert, state.vert, mmPos * MOTOR_MM2ENCODER);
-    } break;
-    case CMD_MOVE_PAN: {
-      Serial.print("º");
-      moveServo(motorPan, state.pan, pos);
-    } break;
-    case CMD_MOVE_TILT: {
-      Serial.print("º");
-      moveServo(motorTilt, state.tilt, pos);
-    } break;
-  }
-  if (cmd != CMD_READ_STATE) {
-    Serial.println("DONE");
-  }
-}
-
-// Moves a motor
-void moveMotor(DualMC33926MotorShield& motor,
-               volatile unsigned long& current, int pos) {
-  if (current < pos) {
-    motor.setM1Speed(-MOTOR_SPEED);
-    while (current < pos);
-  } else if (current > pos) {
-    motor.setM1Speed(+MOTOR_SPEED);
-    while (current > pos);
-  }
-  motor.setM1Speed(0);
+  updateMotor(motorVert, state.vert, target.vert);
+  updateServo(motorPan , state.pan , target.pan );
+  updateServo(motorTilt, state.tilt, target.tilt);
+  dump();
+  delay(LOOP_DELAY);
 }
 
 
-// Moves a servo
-void moveServo(Servo& motor, byte& current, byte pos) {
+// ****************************************************************************
+// Motors
+// ****************************************************************************
+
+// Updates the movement of a motor
+void updateMotor(DualMC33926MotorShield& motor,
+                 volatile unsigned long& current, unsigned long target) {
+  if      (current < target) motor.setM1Speed(-MOTOR_SPEED); // Up
+  else if (current > target) motor.setM1Speed(+MOTOR_SPEED); // Down
+  else                       motor.setM1Speed(0);            // Stop
+}
+
+// Updates the movement of a servo
+void updateServo(Servo& motor, byte& current, byte target) {
   current = motor.read();
-  const int update = current < pos ? +1 : -1;
-  for (; current != pos; current += update) {
-      delay(SERVO_DELAY);
-      motor.write(current);
-  }
+  if      (current < target) motor.write(current + 1); // Up
+  else if (current > target) motor.write(current - 1); // Down
 }
 
 // Reads the encoder values
 void readEncoder() {
-  if (digitalRead(ENCODER_A_PIN) == digitalRead(ENCODER_B_PIN)) {
-    // Down
-    if (state.vert > 0)
-      state.vert -= 1;
+  if (digitalRead(ENCODER_A_PIN) != digitalRead(ENCODER_B_PIN)) {
+    if (state.vert < MOTOR_MAX_STEPS) state.vert += 1; // Up
   } else {
-    // Up
-    if (state.vert < MOTOR_MAX_MM * MOTOR_MM2ENCODER)
-      state.vert += 1;
+    if (state.vert > 0)               state.vert -= 1; // Down
   }
 }
 
+
+// ****************************************************************************
+// Communication
+// ****************************************************************************
+
 // Receives data
 void receiveEvent(int howMany) {
-  // Read input
   if (!Wire.available()) {
     Serial.println("ERROR: No data to read");
     return;
   }
   cmd = Wire.read();
-  if (cmd == CMD_READ_STATE) {
-    return;
+  switch (cmd) {
+    case CMD_READ: {
+      return;
+    }
+    case CMD_MOVE: {
+      // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT |
+      if (Wire.available() != 4) {
+        Serial.println("ERROR: Wrong number of bytes");
+        return;
+      }
+      word mmVert = (Wire.read() << 8) | Wire.read();
+      target.vert = mm2steps(mmVert);
+      target.pan  = Wire.read();
+      target.tilt = Wire.read();
+      return;
+    }
   }
-  if (!Wire.available()) {
-    Serial.println("ERROR: No position specified");
-    return;
-  }
-  pos = Wire.read();
-
-  // Print information
-  Serial.print(cmdChar(cmd));
-  if (cmd != CMD_READ_STATE) {
-    Serial.print(" ");
-    Serial.print(pos);
-  }
-  Serial.println();
+  Serial.println("ERROR: Unknown command");
 }
 
 // Receives a request for data
 void requestEvent() {
   // Check read state
-  if (cmd != CMD_READ_STATE) {
+  if (cmd != CMD_READ) {
     Serial.println("ERROR: Read not requested");
     return;
   }
   // Serialize
+  word mmVert = steps2mm(state.vert);
   byte msg[] = {
-    (byte)(state.vert / MOTOR_MM2ENCODER / 10),
-    state.pan, state.tilt, state.flags,
-    state.bat1Voltage, state.bat2Voltage
+    (byte)(mmVert >> 8), (byte)mmVert, state.pan, state.tilt,
+    state.flags, state.bat1Voltage, state.bat2Voltage
   };
   // Send
-  Wire.write(msg, 6);
+  Wire.write(msg, 7);
 }
 
-// Converts a command to a printable character
-char cmdChar(byte cmd) {
-  switch (cmd) {
-    case CMD_READ_STATE: return 'R';
-    case CMD_MOVE_VERT:  return 'V';
-    case CMD_MOVE_PAN:   return 'P';
-    case CMD_MOVE_TILT:  return 'T';
-  }
-  Serial.println("ERROR: Unknown command");
-  return '-';
+
+// ****************************************************************************
+// Helpers
+// ****************************************************************************
+
+// Converts mm to steps
+unsigned long mm2steps(word mm) {
+  return mm * MOTOR_MM2STEPS;
+}
+
+// Converts steps to mm
+word steps2mm(unsigned long steps) {
+  return (steps + MOTOR_MM2STEPS_2) / MOTOR_MM2STEPS;
+}
+
+// Prints the current conditions
+void dump() {
+  Serial.print((char)cmd);
+  Serial.print(" | ");
+  Serial.print(steps2mm(target.vert));
+  Serial.print(" mm, ");
+  Serial.print(target.pan);
+  Serial.print("º, ");
+  Serial.print(target.tilt);
+  Serial.print("º");
+  Serial.print(" | ");
+  Serial.print(steps2mm(state.vert));
+  Serial.print(" mm, ");
+  Serial.print(state.pan);
+  Serial.print("º, ");
+  Serial.print(state.tilt);
+  Serial.print("º");
+  Serial.print("        \r");
 }
