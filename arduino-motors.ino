@@ -32,9 +32,9 @@ const byte CMD_MOVE               = 0x4D;  // 'M'
 const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
-const word MOTOR_MM2STEPS         =   25;
+const word MOTOR_MM_STEPS         =   25;
 const word MOTOR_SPEED            =  128;
-const word MOTOR_MM2STEPS_2       = MOTOR_MM2STEPS / 2;
+const word MOTOR_MM_STEPS_2       = MOTOR_MM_STEPS / 2;
 
 // Other
 const word LIMIT_SWITCH_THRESHOLD =  400;
@@ -184,7 +184,7 @@ void receiveEvent(int howMany) {
         return;
       }
       const word mmVert = (Wire.read() << 8) | Wire.read();
-      target.vert = mm2steps(mmVert);
+      target.vert = mmToSteps(mmVert);
       target.pan  = Wire.read();
       target.tilt = Wire.read();
       return;
@@ -202,7 +202,7 @@ void requestEvent() {
     return;
   }
   // Serialize
-  const word mmVert = steps2mm(state.vert);
+  const word mmVert = stepsToMm(state.vert);
   const byte msg[] = {
     (byte)(mmVert >> 8), (byte)mmVert, state.pan, state.tilt,
     state.flags, state.bat1Voltage, state.bat2Voltage
@@ -250,27 +250,27 @@ void processSerialCommand() {
 // ****************************************************************************
 
 // Converts mm to steps
-unsigned long mm2steps(word mm) {
-  return mm * MOTOR_MM2STEPS;
+unsigned long mmToSteps(word mm) {
+  return mm * MOTOR_MM_STEPS;
 }
 
 // Converts steps to mm
-word steps2mm(unsigned long steps) {
-  return (steps + MOTOR_MM2STEPS_2) / MOTOR_MM2STEPS;
+word stepsToMm(unsigned long steps) {
+  return (steps + MOTOR_MM_STEPS_2) / MOTOR_MM_STEPS;
 }
 
 // Prints the current conditions
 void dump() {
   Serial.print((char)cmd);
   Serial.print(" | ");
-  Serial.print(steps2mm(target.vert));
+  Serial.print(stepsToMm(target.vert));
   Serial.print(" mm, ");
   Serial.print(target.pan);
   Serial.print("º, ");
   Serial.print(target.tilt);
   Serial.print("º");
   Serial.print(" | ");
-  Serial.print(steps2mm(state.vert));
+  Serial.print(stepsToMm(state.vert));
   Serial.print(" mm, ");
   Serial.print(state.pan);
   Serial.print("º, ");
