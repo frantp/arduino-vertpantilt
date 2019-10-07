@@ -28,13 +28,12 @@ const byte CMD_MOVE               = 0x4D;  // 'M'
 const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
-const word MOTOR_MAX_MM           = 1400;
-const word MOTOR_MM2STEPS         =   25;
-const word MOTOR_SPEED            =  200;
-const word MOTOR_MAX_STEPS        = MOTOR_MAX_MM * MOTOR_MM2STEPS;
-const word MOTOR_MM2STEPS_2       = MOTOR_MM2STEPS / 2;
+const int  MOTOR_MM2STEPS         =   25;
+const int  MOTOR_SPEED            = -200;
+const int  MOTOR_MM2STEPS_2       = MOTOR_MM2STEPS / 2;
 
 // Other
+const word LIMIT_SWITCH_THRESHOLD =  400;
 const word LOOP_DELAY             =   10;
 
 
@@ -60,6 +59,7 @@ struct Target {
 // Motors
 DualMC33926MotorShield motorVert;
 Servo motorPan, motorTilt;
+char motorDirection = 0;
 // Context
 byte cmd = CMD_READ;
 State state = { 0, 0, 0, 0, 0, 0 };
@@ -121,10 +121,20 @@ void loop() {
 
 // Updates the movement of a motor
 void updateMotor(DualMC33926MotorShield& motor,
-                 volatile unsigned long& current, unsigned long target) {
-  if      (current < target) motor.setM1Speed(-MOTOR_SPEED); // Up
-  else if (current > target) motor.setM1Speed(+MOTOR_SPEED); // Down
-  else                       motor.setM1Speed(0);            // Stop
+                 unsigned long current, unsigned long target) {
+  if      (target == 0)      motorDirection = -1; // Down
+  else if (current < target) motorDirection = +1; // Up
+  else if (current > target) motorDirection = -1; // Down
+  else                       motorDirection =  0; // Stop
+  // Limit switches
+  if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
+    if (motorDirection < 0) motorDirection = 0; // Stop down motion
+  }
+  if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
+    if (motorDirection > 0) motorDirection = 0; // Stop up motion
+  }
+  // Update
+  motor.setM1Speed(motorDirection * MOTOR_SPEED);
 }
 
 // Updates the movement of a servo
@@ -137,9 +147,9 @@ void updateServo(Servo& motor, byte& current, byte target) {
 // Reads the encoder values
 void readEncoder() {
   if (digitalRead(ENCODER_A_PIN) != digitalRead(ENCODER_B_PIN)) {
-    if (state.vert < MOTOR_MAX_STEPS) state.vert += 1; // Up
+                        state.vert += 1; // Up
   } else {
-    if (state.vert > 0)               state.vert -= 1; // Down
+    if (state.vert > 0) state.vert -= 1; // Down
   }
 }
 
@@ -165,7 +175,7 @@ void receiveEvent(int howMany) {
         Serial.println("ERROR: Wrong number of bytes");
         return;
       }
-      word mmVert = (Wire.read() << 8) | Wire.read();
+      const word mmVert = (Wire.read() << 8) | Wire.read();
       target.vert = mm2steps(mmVert);
       target.pan  = Wire.read();
       target.tilt = Wire.read();
@@ -184,8 +194,8 @@ void requestEvent() {
     return;
   }
   // Serialize
-  word mmVert = steps2mm(state.vert);
-  byte msg[] = {
+  const word mmVert = steps2mm(state.vert);
+  const byte msg[] = {
     (byte)(mmVert >> 8), (byte)mmVert, state.pan, state.tilt,
     state.flags, state.bat1Voltage, state.bat2Voltage
   };
@@ -196,7 +206,7 @@ void requestEvent() {
 // Reads input from serial
 void readSerial() {
   while (Serial.available()) {
-    char ch = Serial.read();
+    const char ch = Serial.read();
     if (ch == SERIAL_STR_MARKER) {
       serialStarted = true;
       serialIdx = 0;
