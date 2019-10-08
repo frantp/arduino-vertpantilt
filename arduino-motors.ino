@@ -77,8 +77,10 @@ const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
 const word MOTOR_MM_STEPS         =   25;
-const word MOTOR_SPEED            =  128;
 const word MOTOR_MM_STEPS_2       = MOTOR_MM_STEPS / 2;
+const byte MOTOR_MAX_SPEED        =  255;
+const word MOTOR_SPEED_LTH        =   50;
+const word MOTOR_SPEED_HTH        =  500;
 
 // Other
 const word LIMIT_SWITCH_THRESHOLD =  400;
@@ -184,8 +186,15 @@ void updateMotor(unsigned long current, unsigned long target) {
   if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
     if (motorDirection > 0) motorDirection = 0; // Stop up motion
   }
+  // Adjust speed
+  const unsigned long diff = (target - current) * motorDirection;
+  byte speed;
+  if      (diff == 0)              speed = 0
+  else if (diff < MOTOR_SPEED_LTH) speed = MOTOR_MAX_SPEED >> 2;
+  else if (diff < MOTOR_SPEED_HTH) speed = MOTOR_MAX_SPEED >> 1;
+  else                             speed = MOTOR_MAX_SPEED;
   // Update
-  analogWrite(MOTOR_PWM_PIN, motorDirection != 0 ? MOTOR_SPEED : 0);
+  analogWrite(MOTOR_PWM_PIN, speed);
   digitalWrite(MOTOR_DIR_PIN, motorDirection > 0 ? HIGH : LOW);
 }
 
