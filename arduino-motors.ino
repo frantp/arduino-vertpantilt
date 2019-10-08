@@ -261,20 +261,17 @@ word stepsToMm(unsigned long steps) {
 
 // Prints the current conditions
 void dump() {
-  Serial.print((char)cmd);
-  Serial.print(" | ");
-  Serial.print(stepsToMm(target.vert));
-  Serial.print(" mm, ");
-  Serial.print(target.pan);
-  Serial.print("º, ");
-  Serial.print(target.tilt);
-  Serial.print("º");
-  Serial.print(" | ");
-  Serial.print(stepsToMm(state.vert));
-  Serial.print(" mm, ");
-  Serial.print(state.pan);
-  Serial.print("º, ");
-  Serial.print(state.tilt);
-  Serial.print("º");
-  Serial.print("        \r");
+  char buffer[128];
+  sprintf(buffer,
+    "C: %c | "
+    "T: %04d mm, %03dº, %03dº | "
+    "S: %04d mm, %03dº, %03dº | "
+    "F: %02X | B1: %02d.%01d mV, B2: %02d.%01d mV\r",
+    (const char)cmd,
+    stepsToMm(target.vert), target.pan, target.tilt,
+    stepsToMm(state.vert) , state.pan , state.tilt ,
+    state.flags,
+    state.bat1Voltage / 10, state.bat1Voltage % 10,
+    state.bat2Voltage / 10, state.bat2Voltage % 10);
+  Serial.print(buffer);
 }
