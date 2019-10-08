@@ -1,3 +1,47 @@
+/**
+  arduino-motors.ino: Manage motors for the movement in three axes: vertical,
+    pan and tilt.
+
+  The system holds two main structures, one with the current state (including
+  position) and other with the target position. At each loop iteration, the
+  motors are moved, if necessary, in the direction of the target position, one
+  step at a time. This way, the three motors can be moved at the same time,
+  interleaving their steps. Moreover, the movement is non-blocking and is
+  decoupled from the communication, with the possibility of updating the target
+  position even before the motors reach the previous target.
+
+  There are two channels for communication:
+
+  Serial
+  ================
+  String dataframes of the form '@<C><N>$' to update the target position of
+  each motor individually.
+    - <C> is the single-character movement command:
+        'V' for vertical, 'P' for pan, 'T' for tilt
+    - <N> is a multiple-character integer with the target position:
+        vertical in mm, pan and tilt in degrees
+
+  The state of the system is constantly updated in a single constant-width line
+  with zero-padded numbers.
+
+  I2C
+  ================
+  Two possible byte dataframes:
+    - Move (5 bytes): Updates the target position for the three motors at the
+      same time:
+        -------------------------------------------
+        | CMD_MOVE | VERT_H | VERT_L | PAN | TILT |
+        -------------------------------------------
+    - Read (1 byte): Requests the current state of the system:
+        ------------
+        | CMD_READ |
+        ------------
+      The return dataframe is 7 bytes long:
+        --------------------------------------------------------------
+        | VERT_H | VERT_L | PAN | TILT | FLAGS | BAT1VOLT | BAT2VOLT |
+        --------------------------------------------------------------
+*/
+
 #include <Servo.h>
 #include <Wire.h>
 
@@ -24,8 +68,8 @@ const byte UPPER_LIMIT_SWITCH_PIN =   A7;
 
 // Communication
 const byte I2C_ADDR               = 0x16;
-const char SERIAL_STR_MARKER      = '<';
-const char SERIAL_END_MARKER      = '>';
+const char SERIAL_STR_MARKER      = '@';
+const char SERIAL_END_MARKER      = '$';
 
 // Commands
 const byte CMD_MOVE               = 0x4D;  // 'M'
@@ -202,6 +246,7 @@ void requestEvent() {
     return;
   }
   // Serialize
+  // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | FLAGS | BAT1VOLT | BAT2VOLT |
   const word mmVert = stepsToMm(state.vert);
   const byte msg[] = {
     (byte)(mmVert >> 8), (byte)mmVert, state.pan, state.tilt,
@@ -221,7 +266,7 @@ void readSerial() {
     } else if (serialStarted) {
       if (ch == SERIAL_END_MARKER) {
         serialBuffer[serialIdx++] = '\0';
-        processSerialCommand();
+        processSerialCommand(serialBuffer);
         serialStarted = false;
       } else {
         serialBuffer[serialIdx++] = ch;
@@ -234,14 +279,15 @@ void readSerial() {
   }
 }
 
-void processSerialCommand() {
-  switch (serialBuffer[0]) {
-    case 'V': target.vert = atoi(serialBuffer + 1); return;
-    case 'P': target.pan  = atoi(serialBuffer + 1); return;
-    case 'T': target.tilt = atoi(serialBuffer + 1); return;
+// Process a command sent through the serial interface
+void processSerialCommand(const char* cmd) {
+  switch (cmd[0]) {
+    case 'V': target.vert = atoi(cmd + 1); return;
+    case 'P': target.pan  = atoi(cmd + 1); return;
+    case 'T': target.tilt = atoi(cmd + 1); return;
   }
   Serial.print("ERROR: Unknown command ");
-  Serial.println(serialBuffer[0]);
+  Serial.println(cmd[0]);
 }
 
 
