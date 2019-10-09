@@ -79,9 +79,13 @@ const byte CMD_READ               = 0x52;  // 'R'
 const word MOTOR_MM_STEPS         =   25;
 const word MOTOR_MM_STEPS_2       = MOTOR_MM_STEPS / 2;
 const byte MOTOR_SPEED            =  127;
+const byte MOTOR_FBK_TH           =  110;
+const word LIMIT_SWITCH_TH        =  400;
+
+// Flags
+const byte FLAG_MOTOR_STOPPED     =    7;
 
 // Other
-const word LIMIT_SWITCH_THRESHOLD =  400;
 const word LOOP_DELAY             =   10;  // ms
 
 
@@ -183,10 +187,16 @@ void updateMotor(word current, word target) {
   else if (current < target) dir = +1; // Up
   else if (current > target) dir = -1; // Down
   // Limit switches
-  if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
+  if (analogRead(MOTOR_FBK_PIN) > MOTOR_FBK_TH) {
+    dir = 0; // Stop motion
+    bitSet(state.flags, FLAG_MOTOR_STOPPED);
+  } else {
+    bitClear(state.flags, FLAG_MOTOR_STOPPED);
+  }
+  if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir < 0) dir = 0; // Stop down motion
   }
-  if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
+  if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir > 0) dir = 0; // Stop up motion
   }
   // Update
