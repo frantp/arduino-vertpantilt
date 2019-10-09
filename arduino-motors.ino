@@ -162,8 +162,8 @@ void setup() {
 void loop() {
   readSerial();
   updateMotor(state.vert, target.vert);
-  updateServo(motorPan , state.pan , target.pan );
-  updateServo(motorTilt, state.tilt, target.tilt);
+  state.pan  =       updateServo(motorPan,        target.pan );
+  state.tilt = 180 - updateServo(motorTilt, 180 - target.tilt);
   dump();
   delay(LOOP_DELAY);
 }
@@ -189,7 +189,7 @@ void updateMotor(unsigned long current, unsigned long target) {
   // Adjust speed
   const unsigned long diff = (target - current) * motorDirection;
   byte speed;
-  if      (diff == 0)              speed = 0
+  if      (diff == 0)              speed = 0;
   else if (diff < MOTOR_SPEED_LTH) speed = MOTOR_MAX_SPEED >> 2;
   else if (diff < MOTOR_SPEED_HTH) speed = MOTOR_MAX_SPEED >> 1;
   else                             speed = MOTOR_MAX_SPEED;
@@ -199,10 +199,11 @@ void updateMotor(unsigned long current, unsigned long target) {
 }
 
 // Updates the movement of a servo
-void updateServo(Servo& motor, byte& current, byte target) {
-  current = motor.read();
+byte updateServo(Servo& motor, byte target) {
+  byte current = motor.read();
   if      (current < target) motor.write(current + 1); // Up
   else if (current > target) motor.write(current - 1); // Down
+  return current;
 }
 
 // Reads the encoder values
