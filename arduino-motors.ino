@@ -78,13 +78,12 @@ const byte CMD_READ               = 0x52;  // 'R'
 // Motors
 const word MOTOR_MM_STEPS         =   25;
 const word MOTOR_MM_STEPS_2       = MOTOR_MM_STEPS / 2;
-const byte MOTOR_MAX_SPEED        =  255;
-const word MOTOR_SPEED_LTH        =   50;
-const word MOTOR_SPEED_HTH        =  500;
+const byte MOTOR_MAX_SPEED        =  127;
+const word MOTOR_SPEED_TH         =   10;  // mm
 
 // Other
 const word LIMIT_SWITCH_THRESHOLD =  400;
-const word LOOP_DELAY             =   10;
+const word LOOP_DELAY             =    5;  // ms
 
 
 // ****************************************************************************
@@ -92,12 +91,12 @@ const word LOOP_DELAY             =   10;
 // ****************************************************************************
 
 struct State {
-  volatile unsigned long vert;
+  word vert;
   byte pan, tilt, flags, bat1Voltage, bat2Voltage;
 };
 
 struct Target {
-  unsigned long vert;
+  word vert;
   byte pan, tilt;
 };
 
@@ -108,7 +107,7 @@ struct Target {
 
 // Motors
 Servo motorPan, motorTilt;
-char motorDirection = 0;
+volatile unsigned long vert = 0;
 // Context
 byte cmd = CMD_READ;
 State state = { 0, 0, 0, 0, 0, 0 };
@@ -161,6 +160,9 @@ void setup() {
 // Loop method
 void loop() {
   readSerial();
+  noInterrupts();
+  state.vert = (vert + MOTOR_MM_STEPS_2) / MOTOR_MM_STEPS;
+  interrupts();
   updateMotor(state.vert, target.vert);
   state.pan  =       updateServo(motorPan,        target.pan );
   state.tilt = 180 - updateServo(motorTilt, 180 - target.tilt);
@@ -174,17 +176,17 @@ void loop() {
 // ****************************************************************************
 
 // Updates the movement of a motor
-void updateMotor(unsigned long current, unsigned long target) {
-  if      (target == 0)      motorDirection = -1; // Down
-  else if (current < target) motorDirection = +1; // Up
-  else if (current > target) motorDirection = -1; // Down
-  else                       motorDirection =  0; // Stop
+void updateMotor(word current, word target) {
+  char dir = 0;                        // Stop
+  if      (target == 0)      dir = -1; // Down
+  else if (current < target) dir = +1; // Up
+  else if (current > target) dir = -1; // Down
   // Limit switches
   if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
-    if (motorDirection < 0) motorDirection = 0; // Stop down motion
+    if (dir < 0) dir = 0; // Stop down motion
   }
   if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_THRESHOLD) {
-    if (motorDirection > 0) motorDirection = 0; // Stop up motion
+    if (dir > 0) dir = 0; // Stop up motion
   }
   // Adjust speed
   const unsigned long diff = (target - current) * motorDirection;
@@ -195,7 +197,7 @@ void updateMotor(unsigned long current, unsigned long target) {
   else                             speed = MOTOR_MAX_SPEED;
   // Update
   analogWrite(MOTOR_PWM_PIN, speed);
-  digitalWrite(MOTOR_DIR_PIN, motorDirection > 0 ? HIGH : LOW);
+  digitalWrite(MOTOR_DIR_PIN, dir > 0 ? HIGH : LOW);
 }
 
 // Updates the movement of a servo
@@ -208,10 +210,10 @@ byte updateServo(Servo& motor, byte target) {
 
 // Reads the encoder values
 void readEncoder() {
-  if (digitalRead(ENCODER_A_PIN) != digitalRead(ENCODER_B_PIN)) {
-                        state.vert += 1; // Up
+  if (digitalRead(ENCODER_A_PIN) == digitalRead(ENCODER_B_PIN)) {
+                  vert++; // Up
   } else {
-    if (state.vert > 0) state.vert -= 1; // Down
+    if (vert > 0) vert--; // Down
   }
 }
 
@@ -237,8 +239,7 @@ void receiveEvent(int howMany) {
         Serial.println("ERROR: Wrong number of bytes");
         return;
       }
-      const word mmVert = (Wire.read() << 8) | Wire.read();
-      target.vert = mmToSteps(mmVert);
+      target.vert = (Wire.read() << 8) | Wire.read();
       target.pan  = Wire.read();
       target.tilt = Wire.read();
       return;
@@ -257,9 +258,8 @@ void requestEvent() {
   }
   // Serialize
   // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | FLAGS | BAT1VOLT | BAT2VOLT |
-  const word mmVert = stepsToMm(state.vert);
   const byte msg[] = {
-    (byte)(mmVert >> 8), (byte)mmVert, state.pan, state.tilt,
+    (byte)(state.vert >> 8), (byte)state.vert, state.pan, state.tilt,
     state.flags, state.bat1Voltage, state.bat2Voltage
   };
   // Send
@@ -291,10 +291,11 @@ void readSerial() {
 
 // Process a command sent through the serial interface
 void processSerialCommand(const char* cmd) {
+  word value = atoi(cmd + 1);
   switch (cmd[0]) {
-    case 'V': target.vert = atoi(cmd + 1); return;
-    case 'P': target.pan  = atoi(cmd + 1); return;
-    case 'T': target.tilt = atoi(cmd + 1); return;
+    case 'V': target.vert = value; return;
+    case 'P': target.pan  = value; return;
+    case 'T': target.tilt = value; return;
   }
   Serial.print("ERROR: Unknown command ");
   Serial.println(cmd[0]);
@@ -305,29 +306,19 @@ void processSerialCommand(const char* cmd) {
 // Helpers
 // ****************************************************************************
 
-// Converts mm to steps
-unsigned long mmToSteps(word mm) {
-  return mm * MOTOR_MM_STEPS;
-}
-
-// Converts steps to mm
-word stepsToMm(unsigned long steps) {
-  return (steps + MOTOR_MM_STEPS_2) / MOTOR_MM_STEPS;
-}
-
 // Prints the current conditions
 void dump() {
   char buffer[128];
   sprintf(buffer,
-    "C: %c | "
-    "T: %04d mm, %03dº, %03dº | "
-    "S: %04d mm, %03dº, %03dº | "
-    "F: %02X | B1: %02d.%01d mV, B2: %02d.%01d mV\r",
+    "%c | "
+    "V: %04d mm, P: %03dº T: %03dº | "
+    "V: %04d mm, P: %03dº T: %03dº | "
+    "F: %02X, B1: %02d.%01d mV, B2: %02d.%01d mV",
     (const char)cmd,
-    stepsToMm(target.vert), target.pan, target.tilt,
-    stepsToMm(state.vert) , state.pan , state.tilt ,
+    target.vert, target.pan, target.tilt,
+    state.vert , state.pan , state.tilt ,
     state.flags,
     state.bat1Voltage / 10, state.bat1Voltage % 10,
     state.bat2Voltage / 10, state.bat2Voltage % 10);
-  Serial.print(buffer);
+  Serial.println(buffer);
 }
