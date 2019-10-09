@@ -83,7 +83,7 @@ const word MOTOR_SPEED_TH         =   10;  // mm
 
 // Other
 const word LIMIT_SWITCH_THRESHOLD =  400;
-const word LOOP_DELAY             =    5;  // ms
+const word LOOP_DELAY             =   10;  // ms
 
 
 // ****************************************************************************
@@ -113,9 +113,11 @@ byte cmd = CMD_READ;
 State state = { 0, 0, 0, 0, 0, 0 };
 Target target = { 0, 0, 0 };
 // Serial
-char serialBuffer[8];
-byte serialIdx = 0;
-char serialStarted = false;
+char serialInBuffer[8];
+byte serialInIdx = 0;
+char serialInStarted = false;
+char serialOutBuffer[128];
+byte serialOutIdx = 0;
 
 
 // ****************************************************************************
@@ -166,7 +168,7 @@ void loop() {
   updateMotor(state.vert, target.vert);
   state.pan  =       updateServo(motorPan,        target.pan );
   state.tilt = 180 - updateServo(motorTilt, 180 - target.tilt);
-  dump();
+  writeSerial();
   delay(LOOP_DELAY);
 }
 
@@ -271,20 +273,20 @@ void readSerial() {
   while (Serial.available()) {
     const char ch = Serial.read();
     if (ch == SERIAL_STR_MARKER) {
-      serialStarted = true;
-      serialIdx = 0;
-    } else if (serialStarted) {
+      serialInStarted = true;
+      serialInIdx = 0;
+    } else if (serialInStarted) {
       if (ch == SERIAL_END_MARKER) {
-        serialBuffer[serialIdx++] = '\0';
-        processSerialCommand(serialBuffer);
-        serialStarted = false;
+        serialInBuffer[serialInIdx++] = '\0';
+        processSerialCommand(serialInBuffer);
+        serialInStarted = false;
       } else {
-        serialBuffer[serialIdx++] = ch;
+        serialInBuffer[serialInIdx++] = ch;
       }
     }
-    if (serialIdx == 7) {
+    if (serialInIdx == 7) {
       Serial.print("ERROR: Command too long");
-      serialStarted = false;
+      serialInStarted = false;
     }
   }
 }
@@ -301,24 +303,23 @@ void processSerialCommand(const char* cmd) {
   Serial.println(cmd[0]);
 }
 
-
-// ****************************************************************************
-// Helpers
-// ****************************************************************************
-
 // Prints the current conditions
-void dump() {
-  char buffer[128];
-  sprintf(buffer,
-    "%c | "
-    "V: %04d mm, P: %03dº T: %03dº | "
-    "V: %04d mm, P: %03dº T: %03dº | "
-    "F: %02X, B1: %02d.%01d mV, B2: %02d.%01d mV",
-    (const char)cmd,
-    target.vert, target.pan, target.tilt,
-    state.vert , state.pan , state.tilt ,
-    state.flags,
-    state.bat1Voltage / 10, state.bat1Voltage % 10,
-    state.bat2Voltage / 10, state.bat2Voltage % 10);
-  Serial.println(buffer);
+void writeSerial() {
+  if (serialOutIdx == 0) {
+    sprintf(serialOutBuffer,
+      "%c | "
+      "V: %4d mm, P: %3dº T: %3dº | "
+      "V: %4d mm, P: %3dº T: %3dº | "
+      "F: %02X, B1: %2d.%01d mV, B2: %2d.%01d mV\n",
+      (const char)cmd,
+      target.vert, target.pan, target.tilt,
+      state.vert , state.pan , state.tilt ,
+      state.flags,
+      state.bat1Voltage / 10, state.bat1Voltage % 10,
+      state.bat2Voltage / 10, state.bat2Voltage % 10);
+  }
+  Serial.print(serialOutBuffer[serialOutIdx++]);
+  if (serialOutIdx == 128 || serialOutBuffer[serialOutIdx] == '\0') {
+    serialOutIdx = 0;
+  }
 }
