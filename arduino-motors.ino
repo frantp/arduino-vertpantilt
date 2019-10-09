@@ -24,6 +24,10 @@
   The state of the system is constantly updated in a single constant-width line
   with zero-padded numbers.
 
+  Serial communication is non-blocking, reading and writing data one byte at a
+  time. This reduces the extra delay in the main loop to a minimum, lessening
+  the interference with the movement of the servos.
+
   I2C
   ================
   Two possible byte dataframes:
