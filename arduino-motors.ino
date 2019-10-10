@@ -33,17 +33,25 @@
   Two possible byte dataframes:
     - Move (5 bytes): Updates the target position for the three motors at the
       same time:
-        -------------------------------------------
+        +----------+--------+--------+-----+------+
         | CMD_MOVE | VERT_H | VERT_L | PAN | TILT |
-        -------------------------------------------
+        +----------+--------+--------+-----+------+
     - Read (1 byte): Requests the current state of the system:
-        ------------
+        +----------+
         | CMD_READ |
-        ------------
+        +----------+
       The return dataframe is 7 bytes long:
-        --------------------------------------------------------------
-        | VERT_H | VERT_L | PAN | TILT | FLAGS | BAT1VOLT | BAT2VOLT |
-        --------------------------------------------------------------
+        +--------+--------+-----+------+-------+----------+---------+
+        | VERT_H | VERT_L | PAN | TILT | FLAGS | BAT1VOLT | BT2VOLT |
+        +--------+--------+-----+------+-------+----------+---------+
+      The "flags" byte has the following contents:
+        +-----+-----+-----+-----+-----+-----+-----+-----+
+        |  -  | MST | ULS | LLS |    BT1    |    BT2    |
+        +-----+-----+-----+-----+-----+-----+-----+-----+
+      - MST:     Motor state: 0 OK, 1 stopped.
+      - ULS/LLS: Upper/Lower limit switch: 0 not pressed, 1 pressed.
+      - BT1/BT2: Battery 1/2 state
+                 
 */
 
 #include <Servo.h>
@@ -86,7 +94,9 @@ const byte MOTOR_FBK_TH           =  110;
 const word LIMIT_SWITCH_TH        =  400;
 
 // Flags
-const byte FLAG_MOTOR_STOPPED     =    7;
+const byte FLAG_LOWER_LIMIT       =    4;
+const byte FLAG_UPPER_LIMIT       =    5;
+const byte FLAG_MOTOR_STOPPED     =    6;
 
 // Other
 const word LOOP_DELAY             =   10;  // ms
@@ -198,9 +208,18 @@ void updateMotor(word current, word target) {
   }
   if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir < 0) dir = 0; // Stop down motion
+    noInterrupts();
+    vert = 0;
+    interrupts();
+    bitSet(state.flags, FLAG_LOWER_LIMIT);
+  } else {
+    bitClear(state.flags, FLAG_LOWER_LIMIT);
   }
   if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir > 0) dir = 0; // Stop up motion
+    bitSet(state.flags, FLAG_UPPER_LIMIT);
+  } else {
+    bitClear(state.flags, FLAG_UPPER_LIMIT);
   }
   // Update
   analogWrite(MOTOR_PWM_PIN, dir != 0 ? MOTOR_SPEED : 0);
