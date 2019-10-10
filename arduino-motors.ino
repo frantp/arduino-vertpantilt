@@ -24,9 +24,9 @@
   The state of the system is constantly updated in a single constant-width line
   with zero-padded numbers.
 
-  Serial communication is non-blocking, reading and writing data one byte at a
-  time. This reduces the extra delay in the main loop to a minimum, lessening
-  the interference with the movement of the servos.
+  Serial output is non-blocking, writing data one character at a time. This
+  reduces the extra delay in the main loop to a minimum, lessening the
+  interference with the movement of the servos.
 
   I2C
   ================
@@ -46,11 +46,12 @@
         +--------+--------+-----+------+-------+----------+---------+
       The "flags" byte has the following contents:
         +-----+-----+-----+-----+-----+-----+-----+-----+
-        |  -  | MST | ULS | LLS |    BT1    |    BT2    |
+        | MFT | MST | ULS | LLS |    BT1    |    BT2    |
         +-----+-----+-----+-----+-----+-----+-----+-----+
-      - MST:     Motor state: 0 OK, 1 stopped.
-      - ULS/LLS: Upper/Lower limit switch: 0 not pressed, 1 pressed.
-      - BT1/BT2: Battery 1/2 state
+        - MFT:      Motor fault
+        - MST:      Motor stopped
+        - ULS/LLS:  Upper/Lower limit switch pressed
+        - BT1/BT2:  Battery 1/2 state
                  
 */
 
@@ -96,7 +97,8 @@ const word LIMIT_SWITCH_TH        =  400;
 // Flags
 const byte FLAG_LOWER_LIMIT       =    4;
 const byte FLAG_UPPER_LIMIT       =    5;
-const byte FLAG_MOTOR_STOPPED     =    6;
+const byte FLAG_MOTOR_STOP        =    6;
+const byte FLAG_MOTOR_FAULT       =    7;
 
 // Other
 const word LOOP_DELAY             =   10;  // ms
@@ -140,6 +142,7 @@ byte serialOutIdx = 0;
 // Main
 // ****************************************************************************
 
+// ----------------------------------------------------------------------------
 // Setup method
 void setup() {
   // Pins
@@ -175,6 +178,7 @@ void setup() {
   motorTilt.write(tiltPos);
 }
 
+// ----------------------------------------------------------------------------
 // Loop method
 void loop() {
   readSerial();
@@ -193,19 +197,31 @@ void loop() {
 // Motors
 // ****************************************************************************
 
+// ----------------------------------------------------------------------------
 // Updates the movement of a motor
 void updateMotor(word current, word target) {
+  // Compute direction
   char dir = 0;                        // Stop
   if      (target == 0)      dir = -1; // Down
   else if (current < target) dir = +1; // Up
   else if (current > target) dir = -1; // Down
-  // Limit switches
+
+  // Handle corner cases
+  // - Motor fault detected
+  if (!digitalRead(MOTOR_NSF_PIN)) {
+    dir = 0; // Stop motion
+    bitSet(state.flags, FLAG_MOTOR_FAULT);
+  } else {
+    bitClear(state.flags, FLAG_MOTOR_FAULT);
+  }
+  // - Motor feedback current too high
   if (analogRead(MOTOR_FBK_PIN) > MOTOR_FBK_TH) {
     dir = 0; // Stop motion
-    bitSet(state.flags, FLAG_MOTOR_STOPPED);
+    bitSet(state.flags, FLAG_MOTOR_STOP);
   } else {
-    bitClear(state.flags, FLAG_MOTOR_STOPPED);
+    bitClear(state.flags, FLAG_MOTOR_STOP);
   }
+  // - Lower limit switch pressed
   if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir < 0) dir = 0; // Stop down motion
     noInterrupts();
@@ -215,17 +231,20 @@ void updateMotor(word current, word target) {
   } else {
     bitClear(state.flags, FLAG_LOWER_LIMIT);
   }
+  // - Upper limit switch pressed
   if (analogRead(UPPER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir > 0) dir = 0; // Stop up motion
     bitSet(state.flags, FLAG_UPPER_LIMIT);
   } else {
     bitClear(state.flags, FLAG_UPPER_LIMIT);
   }
+
   // Update
   analogWrite(MOTOR_PWM_PIN, dir != 0 ? MOTOR_SPEED : 0);
   digitalWrite(MOTOR_DIR_PIN, dir > 0 ? HIGH : LOW);
 }
 
+// ----------------------------------------------------------------------------
 // Updates the movement of a servo
 byte updateServo(Servo& motor, byte target) {
   byte current = motor.read();
@@ -234,6 +253,7 @@ byte updateServo(Servo& motor, byte target) {
   return current;
 }
 
+// ----------------------------------------------------------------------------
 // Reads the encoder values
 void readEncoder() {
   if (digitalRead(ENCODER_A_PIN) == digitalRead(ENCODER_B_PIN)) {
@@ -248,49 +268,59 @@ void readEncoder() {
 // Communication
 // ****************************************************************************
 
+// ----------------------------------------------------------------------------
 // Receives data
 void receiveEvent(int howMany) {
+  // Read command
   if (!Wire.available()) {
-    Serial.println("ERROR: No data to read");
+    Serial.println("\nERROR: No data to read");
     return;
   }
   cmd = Wire.read();
+
+  // Update state based on command
   switch (cmd) {
     case CMD_READ:
       break;
+
     case CMD_MOVE:
       // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT |
       if (Wire.available() != 4) {
-        Serial.println("ERROR: Wrong number of bytes");
+        Serial.println("\nERROR: Wrong number of bytes");
         break;
       }
       target.vert = (Wire.read() << 8) | Wire.read();
       target.pan  = Wire.read();
       target.tilt = Wire.read();
       break;
+
     default: {
-      Serial.print("ERROR: Unknown command ");
+      Serial.print("\nERROR: Unknown command ");
       Serial.println(cmd, HEX);
       break;
     }
   }
+
   // Clear buffer
   while (Wire.available()) Wire.read();
 }
 
+// ----------------------------------------------------------------------------
 // Receives a request for data
 void requestEvent() {
   // Check read state
   if (cmd != CMD_READ) {
-    Serial.println("ERROR: Read not requested");
+    Serial.println("\nERROR: Read not requested");
     return;
   }
+
   // Serialize
   // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | FLAGS | BAT1VOLT | BAT2VOLT |
   const byte msg[] = {
     (byte)(state.vert >> 8), (byte)state.vert, state.pan, state.tilt,
     state.flags, state.bat1Voltage, state.bat2Voltage
   };
+
   // Send
   Wire.write(msg, 7);
 }
@@ -298,26 +328,33 @@ void requestEvent() {
 // Reads input from serial
 void readSerial() {
   while (Serial.available()) {
+    // Read character
     const char ch = Serial.read();
     if (ch == SERIAL_STR_MARKER) {
+      // - Start
       serialInStarted = true;
       serialInIdx = 0;
     } else if (serialInStarted) {
-      if (ch == SERIAL_END_MARKER) {
+      if (ch != SERIAL_END_MARKER) {
+        // - Middle
+        serialInBuffer[serialInIdx++] = ch;
+      } else {
+        // - End
         serialInBuffer[serialInIdx++] = '\0';
         processSerialCommand(serialInBuffer);
         serialInStarted = false;
-      } else {
-        serialInBuffer[serialInIdx++] = ch;
       }
     }
+
+    // Check command length
     if (serialInIdx == 7) {
-      Serial.print("ERROR: Command too long");
+      Serial.print("\nERROR: Command too long");
       serialInStarted = false;
     }
   }
 }
 
+// ----------------------------------------------------------------------------
 // Process a command sent through the serial interface
 void processSerialCommand(const char* cmd) {
   word value = atoi(cmd + 1);
@@ -326,13 +363,14 @@ void processSerialCommand(const char* cmd) {
     case 'P': target.pan  = value; return;
     case 'T': target.tilt = value; return;
   }
-  Serial.print("ERROR: Unknown command ");
+  Serial.print("\nERROR: Unknown command ");
   Serial.println(cmd[0]);
 }
 
 // Prints the current conditions
 void writeSerial() {
   if (serialOutIdx == 0) {
+    // Build string
     sprintf(serialOutBuffer,
       "%c | "
       "V: %4d mm, P: %3dº T: %3dº | "
@@ -345,6 +383,8 @@ void writeSerial() {
       state.bat1Voltage / 10, state.bat1Voltage % 10,
       state.bat2Voltage / 10, state.bat2Voltage % 10);
   }
+
+  // Print one character at a time
   Serial.print(serialOutBuffer[serialOutIdx++]);
   if (serialOutIdx == 128 || serialOutBuffer[serialOutIdx] == '\0') {
     serialOutIdx = 0;
