@@ -81,7 +81,6 @@ const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
 const word MOTOR_MM_STEPS         =   25;
-const word MOTOR_MM_STEPS_2       = MOTOR_MM_STEPS / 2;
 const byte MOTOR_SPEED            =  127;
 const byte MOTOR_FBK_TH           =  110;
 const word LIMIT_SWITCH_TH        =  400;
@@ -150,7 +149,7 @@ void setup() {
     readEncoder, FALLING);
 
   // Servos
-  motorPan.attach(SERVO_PAN_PIN);  
+  motorPan.attach(SERVO_PAN_PIN);
   motorTilt.attach(SERVO_TILT_PIN);
 
   // Wire and serial
@@ -170,7 +169,7 @@ void setup() {
 void loop() {
   readSerial();
   noInterrupts();
-  state.vert = (vert + MOTOR_MM_STEPS_2) / MOTOR_MM_STEPS;
+  state.vert = (vert + MOTOR_MM_STEPS / 2) / MOTOR_MM_STEPS;
   interrupts();
   updateMotor(state.vert, target.vert);
   state.pan  =       updateServo(motorPan,        target.pan );
