@@ -237,23 +237,26 @@ void receiveEvent(int howMany) {
   }
   cmd = Wire.read();
   switch (cmd) {
-    case CMD_READ: {
-      return;
-    }
-    case CMD_MOVE: {
+    case CMD_READ:
+      break;
+    case CMD_MOVE:
       // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT |
       if (Wire.available() != 4) {
         Serial.println("ERROR: Wrong number of bytes");
-        return;
+        break;
       }
       target.vert = (Wire.read() << 8) | Wire.read();
       target.pan  = Wire.read();
       target.tilt = Wire.read();
-      return;
+      break;
+    default: {
+      Serial.print("ERROR: Unknown command ");
+      Serial.println(cmd, HEX);
+      break;
     }
   }
-  Serial.print("ERROR: Unknown command ");
-  Serial.println(cmd, HEX);
+  // Clear buffer
+  while (Wire.available()) Wire.read();
 }
 
 // Receives a request for data
