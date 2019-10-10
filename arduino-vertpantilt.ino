@@ -1,6 +1,6 @@
 /**
-  arduino-motors.ino: Manage motors for the movement in three axes: vertical,
-    pan and tilt.
+  arduino-vertpantilt.ino: Manage motors for the movement in three axes:
+  vertical, pan and tilt.
 
   The system holds two main structures, one with the current state (including
   position) and other with the target position. At each loop iteration, the
@@ -81,7 +81,7 @@ const byte UPPER_LIMIT_SWITCH_PIN =   A7;
 
 // Communication
 const byte I2C_ADDR               = 0x16;
-const char SERIAL_STR_MARKER      = '@';
+const char SERIAL_BGN_MARKER      = '@';
 const char SERIAL_END_MARKER      = '$';
 
 // Commands
@@ -278,7 +278,7 @@ void receiveEvent(int howMany) {
   }
   cmd = Wire.read();
 
-  // Update state based on command
+  // Update context based on command
   switch (cmd) {
     case CMD_READ:
       break;
@@ -325,12 +325,13 @@ void requestEvent() {
   Wire.write(msg, 7);
 }
 
+// ----------------------------------------------------------------------------
 // Reads input from serial
 void readSerial() {
   while (Serial.available()) {
     // Read character
     const char ch = Serial.read();
-    if (ch == SERIAL_STR_MARKER) {
+    if (ch == SERIAL_BGN_MARKER) {
       // - Start
       serialInStarted = true;
       serialInIdx = 0;
@@ -367,6 +368,7 @@ void processSerialCommand(const char* cmd) {
   Serial.println(cmd[0]);
 }
 
+// ----------------------------------------------------------------------------
 // Prints the current conditions
 void writeSerial() {
   if (serialOutIdx == 0) {
