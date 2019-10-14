@@ -30,28 +30,23 @@
 
   I2C
   ================
-  Two possible byte dataframes:
-    - Move (5 bytes): Updates the target position for the three motors at the
-      same time:
-        +----------+--------+--------+-----+------+
-        | CMD_MOVE | VERT_H | VERT_L | PAN | TILT |
-        +----------+--------+--------+-----+------+
-    - Read (1 byte): Requests the current state of the system:
-        +----------+
-        | CMD_READ |
-        +----------+
-      The return dataframe is 7 bytes long:
-        +--------+--------+-----+------+-------+------+------+
-        | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V |
-        +--------+--------+-----+------+-------+------+------+
-      The "flags" byte has the following contents:
-        +-----+-----+-----+-----+-----+-----+-----+-----+
-        | MFT | MST | ULS | LLS |    BT1    |    BT2    |
-        +-----+-----+-----+-----+-----+-----+-----+-----+
-        - MFT:      Motor fault
-        - MST:      Motor stopped
-        - ULS/LLS:  Upper/Lower limit switch pressed
-        - BT1/BT2:  Battery 1/2 state
+  Receives the target position for the three motors at the same time with the
+  following structure (4 bytes):
+    +--------+--------+-----+------+
+    | VERT_H | VERT_L | PAN | TILT |
+    +--------+--------+-----+------+
+  On requests, the current state of the system is written as follows (7 bytes):
+    +--------+--------+-----+------+-------+------+------+
+    | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V |
+    +--------+--------+-----+------+-------+------+------+
+  The "flags" byte has the following contents:
+    +-----+-----+-----+-----+-----+-----+-----+-----+
+    | MFT | MST | ULS | LLS |    BT1    |    BT2    |
+    +-----+-----+-----+-----+-----+-----+-----+-----+
+    - MFT:      Motor fault
+    - MST:      Motor stopped
+    - ULS/LLS:  Upper/Lower limit switch pressed
+    - BT1/BT2:  Battery 1/2 state
                  
 */
 
@@ -83,10 +78,6 @@ const byte UPPER_LIMIT_SWITCH_PIN =   A7;
 const byte I2C_ADDR               = 0x16;
 const char SERIAL_BGN_MARKER      = '@';
 const char SERIAL_END_MARKER      = '$';
-
-// Commands
-const byte CMD_MOVE               = 0x4D;  // 'M'
-const byte CMD_READ               = 0x52;  // 'R'
 
 // Motors
 const word MOTOR_MM_STEPS         =   25;
@@ -127,7 +118,6 @@ struct Target {
 // Motors
 Servo motorPan, motorTilt;
 // Context
-volatile byte cmd = CMD_READ;
 volatile word vert_steps = 0;
 volatile State state = { 0, 0, 0, 0, 0, 0 };
 volatile Target target = { 0, 0, 0 };
@@ -274,50 +264,19 @@ void readEncoder() {
 // ----------------------------------------------------------------------------
 // Receives data
 void receiveEvent(int numBytes) {
-  // Read command
-  if (numBytes < 1) {
-    Serial.println("\nERROR: No data to read");
+  // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT |
+  if (numBytes < 4) {
+    Serial.println("\nERROR: Wrong number of bytes");
     return;
   }
-  cmd = Wire.read();
-
-  // Update context based on command
-  byte read = 1;
-  switch (cmd) {
-    case CMD_READ: {
-    } break;
-
-    case CMD_MOVE: {
-      // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT |
-      if (Wire.available() < 4) {
-        Serial.println("\nERROR: Wrong number of bytes");
-        break;
-      }
-      target.vert = (Wire.read() << 8) | Wire.read();
-      target.pan  = Wire.read();
-      target.tilt = Wire.read();
-      read += 4;
-    } break;
-
-    default: {
-      Serial.print("\nERROR: Unknown command ");
-      Serial.println(cmd, HEX);
-    } break;
-  }
-
-  // Clear buffer
-  for (byte i = 0; i < numBytes - read; i++) Wire.read();
+  target.vert = (Wire.read() << 8) | Wire.read();
+  target.pan  = Wire.read();
+  target.tilt = Wire.read();
 }
 
 // ----------------------------------------------------------------------------
 // Receives a request for data
 void requestEvent() {
-  // Check read state
-  if (cmd != CMD_READ) {
-    Serial.println("\nERROR: Read not requested");
-    return;
-  }
-
   // Serialize
   // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V |
   byte msg[] = {
@@ -378,11 +337,9 @@ void writeSerial() {
   if (serialOutIdx == 0) {
     // Build string
     sprintf(serialOutBuffer,
-      "%c | "
       "V: %4d mm, P: %3dº T: %3dº | "
       "V: %4d mm, P: %3dº T: %3dº | "
       "F: %02X, B1: %2d.%01d mV, B2: %2d.%01d mV\n",
-      (const char)cmd,
       target.vert, target.pan, target.tilt,
       state.vert , state.pan , state.tilt ,
       state.flags,
