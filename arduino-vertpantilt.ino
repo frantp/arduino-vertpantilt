@@ -31,19 +31,19 @@
   I2C
   ================
   Two possible byte dataframes:
-    - Move (5 bytes): Updates the target position for the three motors at the
+    - Move (6 bytes): Updates the target position for the three motors at the
       same time:
-        +----------+--------+--------+-----+------+
-        | CMD_MOVE | VERT_H | VERT_L | PAN | TILT |
-        +----------+--------+--------+-----+------+
+        +----------+--------+--------+-----+------+-----+
+        | CMD_MOVE | VERT_H | VERT_L | PAN | TILT | CHK |
+        +----------+--------+--------+-----+------+-----+
     - Read (1 byte): Requests the current state of the system:
         +----------+
         | CMD_READ |
         +----------+
-      The return dataframe is 7 bytes long:
-        +--------+--------+-----+------+-------+------+------+
-        | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V |
-        +--------+--------+-----+------+-------+------+------+
+      The return dataframe is 8 bytes long:
+        +--------+--------+-----+------+-------+------+------+-----+
+        | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V | CHK |
+        +--------+--------+-----+------+-------+------+------+-----+
       The "flags" byte has the following contents:
         +-----+-----+-----+-----+-----+-----+-----+-----+
         | MFT | MST | ULS | LLS |    BT1    |    BT2    |
@@ -288,15 +288,25 @@ void receiveEvent(int numBytes) {
     } break;
 
     case CMD_MOVE: {
-      // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT |
-      if (Wire.available() < 4) {
+      // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | CHK |
+      if (Wire.available() < 5) {
         Serial.println("\nERROR: Wrong number of bytes");
         break;
       }
-      target.vert = (Wire.read() << 8) | Wire.read();
-      target.pan  = Wire.read();
-      target.tilt = Wire.read();
-      read += 4;
+      byte vert_h   = Wire.read();
+      byte vert_l   = Wire.read();
+      byte pan      = Wire.read();
+      byte tilt     = Wire.read();
+      byte checksum = Wire.read();
+      read += 5;
+      byte sum = vert_h + vert_l + pan + tilt + checksum;
+      if (sum != 0) {
+        Serial.println("\nERROR: Incorrect checksum");
+        break;
+      }
+      target.vert = (vert_h << 8) | vert_l;
+      target.pan  = pan;
+      target.tilt = tilt;
     } break;
 
     default: {
@@ -319,14 +329,16 @@ void requestEvent() {
   }
 
   // Serialize
-  // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V |
+  // - PAYLOAD: | VERT_H | VERT_L | PAN | TILT | FLAGS | BT1V | BT2V | CHK |
   byte msg[] = {
     (byte)(state.vert >> 8), (byte)state.vert, state.pan, state.tilt,
-    state.flags, state.bat1Voltage, state.bat2Voltage
+    state.flags, state.bat1Voltage, state.bat2Voltage, 0
   };
+  for (byte i = 0; i < 7; i++) msg[7] += msg[i];
+  msg[7] = 0xFF - msg[7] + 1;
 
   // Send
-  Wire.write(msg, 7);
+  Wire.write(msg, 8);
 }
 
 // ----------------------------------------------------------------------------
