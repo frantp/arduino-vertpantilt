@@ -381,7 +381,7 @@ void writeSerial() {
       "%c | "
       "V: %4d mm, P: %3dº T: %3dº | "
       "V: %4d mm, P: %3dº T: %3dº | "
-      "F: %02X, B1: %2d.%01d mV, B2: %2d.%01d mV\n",
+      "F: %02X, B1: %2d.%01d V, B2: %2d.%01d V\n",
       (const char)cmd,
       target.vert, target.pan, target.tilt,
       state.vert , state.pan , state.tilt ,
