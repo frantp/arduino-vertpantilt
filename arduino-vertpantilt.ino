@@ -93,6 +93,7 @@ const word MOTOR_MM_STEPS         =   25;
 const byte MOTOR_SPEED            =  127;
 const byte MOTOR_FBK_TH           =  110;
 const word LIMIT_SWITCH_TH        =  400;
+const word MAX_VERT_STEPS         = 0xFFFF - MOTOR_MM_STEPS;
 
 // Flags
 const byte FLAG_LOWER_LIMIT       =    4;
@@ -125,11 +126,11 @@ struct Target {
 
 // Motors
 Servo motorPan, motorTilt;
-volatile unsigned long vert = 0;
 // Context
-byte cmd = CMD_READ;
-State state = { 0, 0, 0, 0, 0, 0 };
-Target target = { 0, 0, 0 };
+volatile byte cmd = CMD_READ;
+volatile word vert_steps = 0;
+volatile State state = { 0, 0, 0, 0, 0, 0 };
+volatile Target target = { 0, 0, 0 };
 // Serial
 char serialInBuffer[8];
 byte serialInIdx = 0;
@@ -183,9 +184,11 @@ void setup() {
 void loop() {
   readSerial();
   noInterrupts();
-  state.vert = (vert + MOTOR_MM_STEPS / 2) / MOTOR_MM_STEPS;
+  state.vert = (vert_steps + MOTOR_MM_STEPS / 2) / MOTOR_MM_STEPS;
+  word state_vert  = state.vert;
+  word target_vert = target.vert;
   interrupts();
-  updateMotor(state.vert, target.vert);
+  updateMotor(state_vert, target_vert);
   state.pan  =       updateServo(motorPan,        target.pan );
   state.tilt = 180 - updateServo(motorTilt, 180 - target.tilt);
   writeSerial();
@@ -225,7 +228,7 @@ void updateMotor(word current, word target) {
   if (analogRead(LOWER_LIMIT_SWITCH_PIN) < LIMIT_SWITCH_TH) {
     if (dir < 0) dir = 0; // Stop down motion
     noInterrupts();
-    vert = 0;
+    vert_steps = 0;
     interrupts();
     bitSet(state.flags, FLAG_LOWER_LIMIT);
   } else {
@@ -257,9 +260,9 @@ byte updateServo(Servo& motor, byte target) {
 // Reads the encoder values
 void readEncoder() {
   if (digitalRead(ENCODER_A_PIN) == digitalRead(ENCODER_B_PIN)) {
-                  vert++; // Up
+    if (vert_steps < MAX_VERT_STEPS) vert_steps++; // Up
   } else {
-    if (vert > 0) vert--; // Down
+    if (vert_steps > 0)              vert_steps--; // Down
   }
 }
 
@@ -270,15 +273,16 @@ void readEncoder() {
 
 // ----------------------------------------------------------------------------
 // Receives data
-void receiveEvent(int howMany) {
+void receiveEvent(int numBytes) {
   // Read command
-  if (!Wire.available()) {
+  if (numBytes < 1) {
     Serial.println("\nERROR: No data to read");
     return;
   }
   cmd = Wire.read();
 
   // Update context based on command
+  byte read = 1;
   switch (cmd) {
     case CMD_READ: {
     } break;
@@ -302,6 +306,7 @@ void receiveEvent(int howMany) {
       target.vert = (vert_h << 8) | vert_l;
       target.pan  = pan;
       target.tilt = tilt;
+      read += 5;
     } break;
 
     default: {
@@ -311,7 +316,7 @@ void receiveEvent(int howMany) {
   }
 
   // Clear buffer
-  while (Wire.available()) Wire.read();
+  for (byte i = 0; i < numBytes - read; i++) Wire.read();
 }
 
 // ----------------------------------------------------------------------------
