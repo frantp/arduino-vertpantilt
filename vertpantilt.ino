@@ -1,6 +1,6 @@
 /**
-  arduino-vertpantilt.ino: Manage motors for the movement in three axes:
-  vertical, pan and tilt.
+  vertpantilt.ino: Manage motors for the movement in three axes: vertical, pan
+  and tilt.
 
   The system holds two main structures, one with the current state (including
   position) and other with the target position. At each loop iteration, the
@@ -52,7 +52,6 @@
         - MST:      Motor stopped
         - ULS/LLS:  Upper/Lower limit switch pressed
         - BT1/BT2:  Battery 1/2 state
-                 
 */
 
 #include <Servo.h>
