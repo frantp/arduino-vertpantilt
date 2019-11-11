@@ -17,10 +17,10 @@
       - FLAGS:     Bit 2: battery 1 connected, bit 0: battery 2 connected
       - BT1V/BT2V: Battery 1/2 voltage
       - CHK:       Checksum
-  - The following text dataframe (18 characters):
+  - The following text dataframe (14 characters):
     @A<C1><V1>$@B<C2><V2>$
       - C1/C2: Battery 1/2 connected (1 character)
-      - V1/V2: Battery 1/2 voltage, in mV (5 characters)
+      - V1/V2: Battery 1/2 voltage, in mV (3 characters)
 */
 
 
@@ -44,14 +44,21 @@ const byte BT2_VOLTAGE_PIN      =    A1;
 const byte BT1_STATE_PIN        =    A6;
 const byte BT2_STATE_PIN        =    A7;
 
-// Thresholds
+// Batteries
 const word BATTERY_CONNECTED_TH =   200;
 const word BATTERY_HIGH_TH      =   120;  // dV
 const word BATTERY_MEDIUM_TH    =   115;  // dV
 const word BATTERY_LOW_TH       =   110;  // dV
 
-// Serial
+// Flags
+const byte FLAG_BT1STATE        =     0;
+const byte FLAG_BT2STATE        =     2;
+
+// Message
 const byte MSG_HEADER           =  0xFE;
+
+// Other
+const word LOOP_DELAY           =   500;  // ms
 
 
 // ****************************************************************************
@@ -146,21 +153,29 @@ void loop()
     // - PAYLOAD: | HEADER | FLAGS | BT1V | BT2V | CHK |
     byte msg[] = {
       MSG_HEADER,
-      (byte)(state.bt1Connected << 2 | state.bt2Connected << 0),
+      (byte)(state.bt1Connected << FLAG_BT2STATE |
+             state.bt2Connected << FLAG_BT1STATE),
       state.bt1Voltage, state.bt2Voltage, 0
     };
     for (byte i = 1; i < 4; i++) msg[4] += msg[i];
     msg[4] = 0xFF - msg[4] + 1;
-    Serial.write(msg, 5);
+    for (int i = 0; i < 5; i++) {
+      Serial.write(msg[i]);
+      delay(2);
+    }
   } else {
     char serialOutBuffer[15];
     sprintf(serialOutBuffer, "@A%1d%03d$@B%1d%03d$",
       state.bt1Connected, state.bt1Voltage,
       state.bt2Connected, state.bt2Voltage);
-    Serial.println(serialOutBuffer);
+    for (int i = 0; i < 14; i++) {
+      Serial.print(serialOutBuffer[i]);
+      delay(2);
+    }
+    Serial.println();
   }
 
-  delay(500);
+  delay(LOOP_DELAY);
 }
 
 

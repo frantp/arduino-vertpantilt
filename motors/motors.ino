@@ -360,8 +360,16 @@ void requestEvent() {
 void readBatteryState() {
   // - PAYLOAD: | HEADER | BT1V | BT2V | CHK |
   const byte MSG_HEADER = 0xFE;
-  while (Serial.available() && Serial.read() != MSG_HEADER);
-  if (Serial.available() < 5) return;
+  bool found = false;
+  while (Serial.available()) {
+    if (Serial.read() == MSG_HEADER) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) return;
+
+  while (Serial.available() < 4);
   const byte flags = Serial.read();
   const byte bt1v  = Serial.read();
   const byte bt2v  = Serial.read();
@@ -371,10 +379,10 @@ void readBatteryState() {
     Serial.println("\nERROR: Incorrect checksum");
     return;
   }
-  if (flags & FLAG_BT1STATE) bitSet  (state.flags, FLAG_BT1STATE);
-  else                       bitClear(state.flags, FLAG_BT1STATE);
-  if (flags & FLAG_BT2STATE) bitSet  (state.flags, FLAG_BT2STATE);
-  else                       bitClear(state.flags, FLAG_BT2STATE);
+  if (flags & 1 << FLAG_BT1STATE) bitSet  (state.flags, FLAG_BT1STATE);
+  else                            bitClear(state.flags, FLAG_BT1STATE);
+  if (flags & 1 << FLAG_BT2STATE) bitSet  (state.flags, FLAG_BT2STATE);
+  else                            bitClear(state.flags, FLAG_BT2STATE);
   state.bt1Voltage = bt1v;
   state.bt2Voltage = bt2v;
 }
